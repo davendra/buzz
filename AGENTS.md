@@ -6,6 +6,17 @@ code style, PR process, architecture), see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
+## What is Buzz?
+
+Buzz is a self-hostable Nostr-based workspace where humans and AI agents are
+first-class members of the same channels. Every action — message, reaction,
+workflow step, git event — is a signed Nostr event identified by an integer
+`kind`; adding a feature means adding a kind (old clients ignore unknown kinds).
+The relay is the single source of truth (no P2P/gossip); a community — one
+relay, host-derived from the URL — is the tenant boundary.
+
+---
+
 ## Ecosystem
 
 Buzz spans five repos. This one (`block/buzz`) is the OSS source for the relay, desktop, mobile, and CLI. The others handle internal builds and deployment:
@@ -45,6 +56,9 @@ crates/
   buzz-search         # Postgres FTS full-text search
   buzz-audit          # Hash-chain audit log
   buzz-media          # Blossom/S3 media storage
+  buzz-relay-mesh     # Inter-relay QUIC (iroh) mesh — transport, membership, wire contract
+  buzz-push-gateway   # NIP-PL push gateway for mobile (own Dockerfile.push-gateway)
+  buzz-conformance    # Replay checker for the MultiTenantRelay.tla formal spec
   # Agent surface
   buzz-acp            # ACP harness bridging Buzz events to AI agents
   buzz-agent          # Minimal ACP-compliant agent (non-streaming, tool-calls-as-output)
@@ -66,6 +80,7 @@ crates/
 
 desktop/              # Tauri 2 + React 19 desktop app
 web/                  # Browser web client (repo browser, served by the relay)
+admin-web/            # Admin console SPA (React 19 + Vite + Vitest)
 mobile/               # Flutter mobile app
 migrations/           # SQL migrations (auto-applied on relay startup)
 scripts/              # Dev tooling
