@@ -105,6 +105,19 @@ export function useEnsureSeedAgents() {
       }
       if (seeds.length === 0) return;
 
+      // codex-acp hardcodes its session sandbox: DEFAULT_AGENT_MODE = "agent",
+      // which carries `networkAccess: false`. Buzz's permission-mode values
+      // (bypassPermissions/…) are Claude-style ids the adapter doesn't
+      // recognise, so it silently falls back to that no-network default and
+      // every CLI call fails instantly — indistinguishable from an expired
+      // session. `INITIAL_AGENT_MODE` is the adapter's own override; only
+      // "agent-full-access" grants network. These advisors exist to query live
+      // HTTP APIs, so they need it. (~/.codex/config.toml has no effect here.)
+      const CODEX_NETWORK_ENV: Record<string, string> =
+        runtime.id === "codex"
+          ? { INITIAL_AGENT_MODE: "agent-full-access" }
+          : {};
+
       const byName = new Map(
         (agentsQuery.data ?? []).map((a) => [a.name.trim().toLowerCase(), a]),
       );
@@ -123,10 +136,14 @@ export function useEnsureSeedAgents() {
               harnessOverride: true,
               spawnAfterCreate: true,
               startOnAppLaunch: true,
+              envVars: CODEX_NETWORK_ENV,
               backend: { type: "local" },
             });
             console.warn(`[jarvis] created "${seed.name}" on ${runtime.id}`);
-          } else if (existing.agentCommand !== runtime.command) {
+          } else if (
+            existing.agentCommand !== runtime.command ||
+            existing.envVars?.INITIAL_AGENT_MODE !== "agent-full-access"
+          ) {
             // Exists but on the wrong runtime (e.g. buzz-agent, which demands an
             // API key) → switch it to codex in place and restart. Clearing
             // provider/model drops the Anthropic LLM env; codex reads its model
@@ -140,9 +157,10 @@ export function useEnsureSeedAgents() {
               harnessOverride: true,
               provider: null,
               model: null,
+              envVars: { ...(existing.envVars ?? {}), ...CODEX_NETWORK_ENV },
             });
             console.warn(
-              `[jarvis] reconfigured "${seed.name}" to ${runtime.id}`,
+              `[jarvis] reconfigured "${seed.name}" to ${runtime.id} (network on)`,
             );
             // Restart so the running process picks up the new runtime. Surface
             // failures — a silent catch here previously left the agent running
