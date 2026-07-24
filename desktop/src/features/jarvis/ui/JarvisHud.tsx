@@ -173,6 +173,56 @@ export function JarvisHud() {
     onTranscript: handleSend,
   });
 
+  // Hold SPACE anywhere in the HUD to talk — same as holding the mic button.
+  // Refs keep the listeners stable: `press`/`release` change identity when
+  // `holding` flips, and re-registering mid-hold could drop the keyup.
+  const pressRef = React.useRef(ptt.press);
+  const releaseRef = React.useRef(ptt.release);
+  pressRef.current = ptt.press;
+  releaseRef.current = ptt.release;
+
+  React.useEffect(() => {
+    if (!open) return;
+
+    // Never steal the space key from a field the user is typing into.
+    function isTypingTarget(node: EventTarget | null): boolean {
+      const el = node as HTMLElement | null;
+      if (!el?.tagName) return false;
+      return (
+        el.tagName === "INPUT" ||
+        el.tagName === "TEXTAREA" ||
+        el.tagName === "SELECT" ||
+        el.isContentEditable
+      );
+    }
+
+    function onKeyDown(e: KeyboardEvent) {
+      // `e.repeat` guards the OS key-repeat storm while the key is held.
+      if (e.code !== "Space" || e.repeat || isTypingTarget(e.target)) return;
+      e.preventDefault();
+      void pressRef.current();
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code !== "Space" || isTypingTarget(e.target)) return;
+      e.preventDefault();
+      void releaseRef.current();
+    }
+    // Losing focus mid-hold would otherwise swallow the keyup and leave the
+    // mic latched open.
+    function onBlur() {
+      void releaseRef.current();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [open]);
+
   if (!open) {
     return (
       <button

@@ -73,7 +73,7 @@ export function JarvisControls({
           onPointerUp={voice.release}
           onPointerLeave={() => voice.holding && voice.release()}
           aria-label="Hold to talk"
-          title={voice.error ?? "Hold to talk"}
+          title={voice.error ?? "Hold to talk (or hold Space)"}
           className={cn(
             "flex size-10 shrink-0 items-center justify-center rounded-full border transition-all",
             voice.holding
@@ -92,7 +92,9 @@ export function JarvisControls({
               submit();
             }
           }}
-          placeholder={disabledReason ?? "Speak or type a request…"}
+          placeholder={
+            disabledReason ?? "Hold Space to talk, or type a request…"
+          }
           disabled={disabled}
           className={cn(
             "jarvis-panel min-w-0 flex-1 rounded-md px-3 py-2 text-sm outline-none placeholder:opacity-40",
