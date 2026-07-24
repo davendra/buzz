@@ -7,6 +7,7 @@ mod deep_link;
 mod event_sync;
 mod events;
 mod huddle;
+mod jarvis_voice;
 mod managed_agents;
 mod media_proxy;
 #[cfg(feature = "mesh-llm")]
@@ -354,6 +355,9 @@ pub fn run() {
         .manage(ClipboardState::new())
         .manage(PendingCommunityDeepLinks::default())
         .manage(BuilderlabSession::default())
+        .manage(std::sync::Mutex::new(
+            jarvis_voice::JarvisVoiceState::default(),
+        ))
         .manage(BuilderlabLogin::default())
         .manage(commands::pairing::PairingHandle::new())
         .setup(move |app| {
@@ -857,6 +861,10 @@ pub fn run() {
             get_model_status,
             set_tts_enabled,
             speak_agent_message,
+            jarvis_voice::jarvis_start_listening,
+            jarvis_voice::jarvis_stop_listening,
+            jarvis_voice::jarvis_set_ptt,
+            jarvis_voice::jarvis_push_audio,
             add_agent_to_huddle,
             check_pipeline_hotstart,
             confirm_huddle_active,

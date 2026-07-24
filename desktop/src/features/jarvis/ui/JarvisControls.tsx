@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Send, Square } from "lucide-react";
+import { Mic, Send, Square } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 
@@ -18,6 +18,13 @@ type JarvisControlsProps = {
   onKillVoice: () => void;
   disabled: boolean;
   disabledReason: string | null;
+  /** Push-to-talk: hold to record, release to transcribe + send. */
+  voice: {
+    holding: boolean;
+    error: string | null;
+    press: () => void;
+    release: () => void;
+  };
 };
 
 export function JarvisControls({
@@ -25,6 +32,7 @@ export function JarvisControls({
   onKillVoice,
   disabled,
   disabledReason,
+  voice,
 }: JarvisControlsProps) {
   const [value, setValue] = React.useState("");
 
@@ -51,6 +59,27 @@ export function JarvisControls({
       </div>
 
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            voice.press();
+          }}
+          onPointerUp={voice.release}
+          onPointerLeave={() => voice.holding && voice.release()}
+          disabled={disabled}
+          aria-label="Hold to talk"
+          title={voice.error ?? "Hold to talk"}
+          className={cn(
+            "flex size-10 shrink-0 items-center justify-center rounded-full border transition-all",
+            voice.holding
+              ? "jarvis-amber scale-110 border-[color:var(--jarvis-amber)] shadow-[0_0_16px_rgba(255,182,72,0.6)]"
+              : "border-[color:var(--jarvis-line)] jarvis-glow-text",
+            disabled && "cursor-not-allowed opacity-40",
+          )}
+        >
+          <Mic className="size-4" />
+        </button>
         <input
           value={value}
           onChange={(e) => setValue(e.target.value)}

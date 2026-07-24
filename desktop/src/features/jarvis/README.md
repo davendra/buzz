@@ -27,13 +27,24 @@ what Buzz already has.
 
 ## Talking to it (voice)
 
-The HUD is the *display + control* surface. Voice **input** currently rides Buzz's
-existing huddle voice loop: start a huddle with the concierge agent, speak, and
-the huddle STT → the agent replies → the HUD shows and speaks it. A dedicated
-push-to-talk mic capture wired directly into the HUD (independent of a huddle) is
-the one piece deferred to a follow-up — it needs the STT/TTS pipelines lifted out
-of `HuddleState` (see the plan). The text input works today for any agent that
-has an active channel.
+**Push-to-talk is built and huddle-independent.** Hold the mic button (or the
+text input works too), speak, release — the HUD:
+
+1. runs a **decoupled STT session** in Rust (`src-tauri/src/jarvis_voice.rs`):
+   its own `SttPipeline` (the same sherpa Parakeet recognizer) driven by a
+   push-to-talk flag, with **no** `HuddleState` coupling and **no** relay post;
+2. emits each finalized utterance as a `jarvis-transcript` Tauri event
+   (`lib/useJarvisPushToTalk.ts` captures the mic via the shared `worklet.js`
+   and streams f32/48kHz PCM to `jarvis_push_audio`);
+3. sends that text to the concierge as an explicit @mention
+   (`sendChannelMessage`), so the agent always triggers;
+4. speaks the reply via browser **`speechSynthesis`** (`lib/useJarvisVoice.ts`) —
+   the native Pocket TTS command is huddle-gated, so the HUD uses the Web Speech
+   fallback the reference playbook specifies. **Kill Voice** cancels it.
+
+The one bootstrap caveat: sending needs a channel the concierge is in. Once
+you've talked to it once (voice or text) in a channel, that channel sticks for
+the session. The huddle voice loop still works too, independently.
 
 ## Wiring (all reused, nothing new in Rust)
 

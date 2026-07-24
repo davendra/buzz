@@ -1,15 +1,13 @@
 import * as React from "react";
-import { invoke } from "@tauri-apps/api/core";
 
 /**
- * Speak the concierge's reply aloud via the native Pocket TTS command
- * (`speak_agent_message`, the same one the huddle uses). We speak once per
- * message, only after the turn is no longer "working" (so we voice the settled
- * reply, not half-streamed chunks), and never when the kill switch has
- * suppressed the current message.
- *
- * All speech goes through the Rust backend, which owns sequential/non-overlapping
- * playback — we never play audio in JS.
+ * Speak the concierge's reply aloud. The native Pocket TTS command is
+ * huddle-gated, so the standalone HUD uses the browser Web Speech API
+ * (`speechSynthesis`) — the same fallback the reference JARVIS playbook
+ * specifies. We speak once per message, only after the turn settles (so we
+ * voice the finished reply, not half-streamed chunks). `speechSynthesis` owns a
+ * native utterance queue, so playback is sequential and non-overlapping; the
+ * kill switch cancels it outright.
  */
 export function useJarvisVoice(params: {
   reply: { id: string; text: string } | null;
@@ -30,17 +28,17 @@ export function useJarvisVoice(params: {
       return;
     }
     spokenIds.current.add(reply.id);
-    invoke("speak_agent_message", { text: reply.text }).catch(() => {
-      // Backpressure or TTS pipeline unavailable (e.g. no active voice
-      // session) — the HUD still shows the text; audio is best-effort.
-    });
+
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    const utterance = new SpeechSynthesisUtterance(reply.text);
+    utterance.rate = 1.05;
+    utterance.pitch = 1;
+    synth.speak(utterance);
   }, [reply, isWorking, voiceEnabled, killedMessageId]);
 }
 
-/** Best-effort request to silence any in-flight speech. */
+/** Immediately silence any in-flight or queued speech. */
 export function stopJarvisSpeech() {
-  invoke("stop_agent_speech").catch(() => {
-    // Command may not exist in this build; the kill switch still suppresses
-    // future chunks at the JS layer. No-op on failure.
-  });
+  window.speechSynthesis?.cancel();
 }

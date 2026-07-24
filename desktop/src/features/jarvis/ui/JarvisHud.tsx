@@ -24,6 +24,7 @@ import {
   useJarvisHudState,
 } from "../jarvisHudStore";
 import { useJarvisTarget } from "../lib/useJarvisTarget";
+import { useJarvisPushToTalk } from "../lib/useJarvisPushToTalk";
 import { stopJarvisSpeech, useJarvisVoice } from "../lib/useJarvisVoice";
 import { JarvisActionLog } from "./JarvisActionLog";
 import { JarvisControls } from "./JarvisControls";
@@ -128,6 +129,12 @@ export function JarvisHud() {
     stopJarvisSpeech();
   }, [reply]);
 
+  // Push-to-talk: hold the mic, release to transcribe and send to the concierge.
+  const ptt = useJarvisPushToTalk({
+    enabled: open && !!targetPubkey,
+    onTranscript: handleSend,
+  });
+
   if (!open) {
     return (
       <button
@@ -217,6 +224,7 @@ export function JarvisHud() {
           onKillVoice={handleKillVoice}
           disabled={!!disabledReason}
           disabledReason={disabledReason}
+          voice={ptt}
         />
       </div>
     </div>
