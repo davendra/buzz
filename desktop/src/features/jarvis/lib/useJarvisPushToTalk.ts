@@ -71,21 +71,16 @@ export function useJarvisPushToTalk(params: {
 
   // Start/stop the Rust STT session with the HUD, and relay transcripts.
   React.useEffect(() => {
-    console.warn(`[jarvis-voice] effect: enabled=${enabled}`);
     if (!enabled) return;
     let disposed = false;
     let unlisten: (() => void) | null = null;
 
-    void invoke("jarvis_start_listening")
-      .then(() => console.warn("[jarvis-voice] STT session started"))
-      .catch((e) => {
-        console.warn("[jarvis-voice] start_listening FAILED:", e);
-        if (!disposed)
-          setError(typeof e === "string" ? e : "voice unavailable");
-      });
+    void invoke("jarvis_start_listening").catch((e) => {
+      console.warn("[jarvis-voice] start_listening failed:", e);
+      if (!disposed) setError(typeof e === "string" ? e : "voice unavailable");
+    });
     void listen<string>("jarvis-transcript", (event) => {
       const text = event.payload?.trim();
-      console.warn(`[jarvis-voice] TRANSCRIPT: "${text}"`);
       if (text) onTranscriptRef.current(text);
     }).then((fn) => {
       if (disposed) fn();
@@ -102,21 +97,15 @@ export function useJarvisPushToTalk(params: {
   }, [enabled]);
 
   const press = React.useCallback(async () => {
-    console.warn(`[jarvis-voice] press: enabled=${enabled} holding=${holding}`);
     if (!enabled || holding) return;
     setError(null);
     try {
-      if (!micRef.current) {
-        console.warn("[jarvis-voice] requesting mic…");
-        micRef.current = await startMic();
-        console.warn("[jarvis-voice] mic ready");
-      }
+      if (!micRef.current) micRef.current = await startMic();
       micRef.current.setTransmitting(true);
       await invoke("jarvis_set_ptt", { active: true });
       setHolding(true);
-      console.warn("[jarvis-voice] PTT ON");
     } catch (e) {
-      console.warn("[jarvis-voice] press FAILED:", e);
+      console.warn("[jarvis-voice] mic failed:", e);
       setError(e instanceof Error ? e.message : "microphone unavailable");
     }
   }, [enabled, holding]);

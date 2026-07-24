@@ -3,6 +3,7 @@ import { Bot, X } from "lucide-react";
 
 import { sendChannelMessage } from "@/shared/api/tauri";
 import { useChannelsQuery } from "@/features/channels/hooks";
+import { truncatePubkey } from "@/shared/lib/pubkey";
 import { attachManagedAgentToChannel } from "@/features/agents/channelAgents";
 import { useManagedAgentObserverBridge } from "@/features/agents/observerRelayStore";
 import {
@@ -134,13 +135,7 @@ export function JarvisHud() {
 
   const handleSend = React.useCallback(
     (text: string) => {
-      console.warn(
-        `[jarvis] send: target=${targetPubkey?.slice(0, 8)} channel=${channelId} text="${text}"`,
-      );
-      if (!targetPubkey || !channelId) {
-        console.warn("[jarvis] send BLOCKED — missing target or channel");
-        return;
-      }
+      if (!targetPubkey || !channelId) return;
       clearJarvisVoiceKill();
       // An agent only receives mentions in channels it belongs to. A freshly
       // seeded agent is in none, so attach it first (idempotent — already-member
@@ -150,16 +145,15 @@ export function JarvisHud() {
         if (target) {
           try {
             await attachManagedAgentToChannel(channelId, { agent: target });
-            console.warn("[jarvis] agent attached to channel");
-          } catch (e) {
-            console.warn("[jarvis] attach skipped:", e);
+          } catch {
+            // Already a member, or membership is managed elsewhere — the send
+            // below is still worth attempting.
           }
         }
         try {
           await sendChannelMessage(channelId, text, null, undefined, [
             targetPubkey,
           ]);
-          console.warn("[jarvis] send OK");
         } catch (err) {
           console.warn("[jarvis] send failed:", err);
         }
@@ -219,7 +213,7 @@ export function JarvisHud() {
             >
               {agents.map((a) => (
                 <option key={a.pubkey} value={a.pubkey}>
-                  {a.name} · {a.status} · {a.pubkey.slice(0, 6)}
+                  {a.name} · {a.status} · {truncatePubkey(a.pubkey)}
                 </option>
               ))}
             </select>

@@ -64,6 +64,25 @@ Create an agent named **"Jarvis"** and paste the concierge persona
 questions to the HLP (mortgage) and VasyERP (ERP) read-only CLIs and replies in a
 short, spoken style tuned for TTS.
 
+## Gotchas worth knowing (each cost real debugging time)
+
+- **Codex agents have no network by default.** The `codex-acp` adapter hardcodes
+  its session sandbox: `DEFAULT_AGENT_MODE = "agent"` carries
+  `networkAccess: false`, and Buzz's permission-mode values
+  (`bypassPermissions`/…) are Claude-style ids the adapter ignores, so it falls
+  back to that default. `~/.codex/config.toml` has **no effect** on this path.
+  The fix is the adapter's own `INITIAL_AGENT_MODE=agent-full-access`, set as an
+  agent env var by `useEnsureSeedAgents`. Agents must be **restarted** to pick it
+  up — a config change alone does nothing to a running process.
+- **Diagnosing it:** a network-blocked CLI call returns in ~0.17s with
+  `session_valid: false`; a real one takes ~0.8s. Fast + false = no network, not
+  an expired session. The agent will confidently report "session expired".
+- **Agents only receive mentions in channels they belong to.** A freshly seeded
+  agent is in none, so the HUD attaches it before sending; without that the
+  message posts fine and the agent never sees it.
+- **Agent persistence:** dev keychain writes for agent keys are unreliable, so
+  agents are re-created from `~/.buzz/jarvis-seed-agents.json` on every startup.
+
 ## Verification
 
 - `pnpm typecheck && pnpm check` (types, biome, file-sizes, px-text).
