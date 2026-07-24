@@ -5,8 +5,10 @@ import {
   useAcpRuntimesQuery,
   useCreateManagedAgentMutation,
   useManagedAgentsQuery,
+  useUpdateManagedAgentMutation,
 } from "@/features/agents/hooks";
 import { useGlobalAgentConfig } from "@/features/agents/useGlobalAgentConfig";
+import { restartManagedAgentRuntime } from "@/shared/api/tauriManagedAgents";
 import { useIdentityQuery } from "@/shared/api/hooks";
 import type { AcpRuntimeCatalogEntry } from "@/shared/api/types";
 
@@ -50,6 +52,7 @@ export function useEnsureSeedAgents() {
   const runtimesQuery = useAcpRuntimesQuery();
   const { globalConfig } = useGlobalAgentConfig();
   const createMutation = useCreateManagedAgentMutation();
+  const updateMutation = useUpdateManagedAgentMutation();
   const doneRef = React.useRef(false);
 
   const ready =
@@ -59,6 +62,7 @@ export function useEnsureSeedAgents() {
     !!runtimesQuery.data;
 
   const createAgent = createMutation.mutateAsync;
+  const updateAgent = updateMutation.mutateAsync;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: run exactly once when ready; captured values are read at run time, guarded by doneRef
   React.useEffect(() => {
@@ -87,28 +91,58 @@ export function useEnsureSeedAgents() {
       }
       if (seeds.length === 0) return;
 
-      const existing = new Set(
-        (agentsQuery.data ?? []).map((a) => a.name.trim().toLowerCase()),
+      const byName = new Map(
+        (agentsQuery.data ?? []).map((a) => [a.name.trim().toLowerCase(), a]),
       );
       for (const seed of seeds) {
-        if (existing.has(seed.name.trim().toLowerCase())) continue;
+        const existing = byName.get(seed.name.trim().toLowerCase());
         try {
-          await createAgent({
-            name: seed.name,
-            systemPrompt: seed.systemPrompt,
-            acpCommand: "buzz-acp",
-            agentCommand: runtime.command ?? undefined,
-            agentArgs: runtime.defaultArgs,
-            mcpCommand: runtime.mcpCommand ?? "",
-            harnessOverride: true,
-            spawnAfterCreate: true,
-            startOnAppLaunch: true,
-            // Local runtime = no remote provider API key. Codex authenticates
-            // via the user's subscription (`codex login`) and reads its model
-            // from ~/.codex/config.toml, so no model/provider is set here.
-            backend: { type: "local" },
-          });
-          console.info(`[jarvis] seeded agent "${seed.name}" on ${runtime.id}`);
+          if (!existing) {
+            // Missing → create on codex (local backend = no API key).
+            await createAgent({
+              name: seed.name,
+              systemPrompt: seed.systemPrompt,
+              acpCommand: "buzz-acp",
+              agentCommand: runtime.command ?? undefined,
+              agentArgs: runtime.defaultArgs,
+              mcpCommand: runtime.mcpCommand ?? "",
+              harnessOverride: true,
+              spawnAfterCreate: true,
+              startOnAppLaunch: true,
+              backend: { type: "local" },
+            });
+            console.warn(`[jarvis] created "${seed.name}" on ${runtime.id}`);
+          } else if (existing.agentCommand !== runtime.command) {
+            // Exists but on the wrong runtime (e.g. buzz-agent, which demands an
+            // API key) → switch it to codex in place and restart. Clearing
+            // provider/model drops the Anthropic LLM env; codex reads its model
+            // from ~/.codex and authenticates via the subscription.
+            await updateAgent({
+              pubkey: existing.pubkey,
+              acpCommand: "buzz-acp",
+              agentCommand: runtime.command ?? undefined,
+              agentArgs: runtime.defaultArgs,
+              mcpCommand: runtime.mcpCommand ?? "",
+              harnessOverride: true,
+              provider: null,
+              model: null,
+            });
+            console.warn(
+              `[jarvis] reconfigured "${seed.name}" to ${runtime.id}`,
+            );
+            // Restart so the running process picks up the new runtime. Surface
+            // failures — a silent catch here previously left the agent running
+            // on the old harness while the record claimed the new one.
+            try {
+              await restartManagedAgentRuntime(
+                existing.pubkey,
+                existing.relayUrl,
+              );
+              console.warn(`[jarvis] restarted "${seed.name}"`);
+            } catch (e) {
+              console.warn(`[jarvis] restart of "${seed.name}" failed:`, e);
+            }
+          }
         } catch (e) {
           console.warn(`[jarvis] seeding "${seed.name}" failed:`, e);
         }
