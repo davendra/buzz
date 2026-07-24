@@ -1,0 +1,123 @@
+/*
+ * JARVIS HUD aesthetic. Scoped under .jarvis-hud so nothing leaks into the rest
+ * of the app. Colors are driven by CSS variables so the accent can be themed.
+ */
+.jarvis-hud {
+  --jarvis-cyan: #38f0ff;
+  --jarvis-cyan-dim: #1b6b78;
+  --jarvis-amber: #ffb648;
+  --jarvis-bg: #030a10;
+  --jarvis-panel: rgba(8, 22, 30, 0.72);
+  --jarvis-line: rgba(56, 240, 255, 0.22);
+  color: var(--jarvis-cyan);
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      rgba(56, 240, 255, 0.08),
+      transparent 60%
+    ),
+    var(--jarvis-bg);
+}
+
+.jarvis-panel {
+  background: var(--jarvis-panel);
+  border: 1px solid var(--jarvis-line);
+  box-shadow:
+    inset 0 0 24px rgba(56, 240, 255, 0.06),
+    0 0 18px rgba(56, 240, 255, 0.05);
+  backdrop-filter: blur(3px);
+}
+
+.jarvis-glow-text {
+  text-shadow: 0 0 8px rgba(56, 240, 255, 0.55);
+}
+
+.jarvis-amber {
+  color: var(--jarvis-amber);
+}
+
+/* Scanline overlay across the whole HUD */
+.jarvis-scanlines::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(56, 240, 255, 0.04) 0px,
+    rgba(56, 240, 255, 0.04) 1px,
+    transparent 2px,
+    transparent 4px
+  );
+  opacity: 0.5;
+  mix-blend-mode: screen;
+}
+
+/* Arc reactor */
+.jarvis-reactor-ring {
+  border: 2px solid var(--jarvis-cyan-dim);
+  border-radius: 9999px;
+  box-shadow:
+    0 0 24px rgba(56, 240, 255, 0.25),
+    inset 0 0 20px rgba(56, 240, 255, 0.18);
+}
+
+.jarvis-reactor-core {
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle,
+    var(--jarvis-cyan) 0%,
+    rgba(56, 240, 255, 0.5) 40%,
+    transparent 72%
+  );
+  animation: jarvis-core-pulse 2.6s ease-in-out infinite;
+}
+
+.jarvis-reactor-core[data-active="true"] {
+  animation-duration: 0.9s;
+}
+
+@keyframes jarvis-core-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+
+.jarvis-spin-slow {
+  animation: jarvis-spin 14s linear infinite;
+}
+.jarvis-spin-rev {
+  animation: jarvis-spin 22s linear infinite reverse;
+}
+@keyframes jarvis-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Radar sweep */
+.jarvis-radar-sweep {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(56, 240, 255, 0.28) 40deg,
+    transparent 70deg
+  );
+  border-radius: 9999px;
+  animation: jarvis-spin 4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jarvis-reactor-core,
+  .jarvis-spin-slow,
+  .jarvis-spin-rev,
+  .jarvis-radar-sweep {
+    animation: none;
+  }
+}

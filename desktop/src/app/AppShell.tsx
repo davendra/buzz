@@ -42,6 +42,7 @@ import { usePersonaSync } from "@/features/agents/lib/usePersonaSync";
 import { useAgentObserverIngestion } from "@/features/agents/useAgentObserverIngestion";
 import { AgentManagementDialogs } from "@/features/agents/ui/AgentManagementDialogs";
 import { RequestedAgentCreateDialogs } from "@/features/agents/ui/RequestedAgentCreateDialogs";
+import { JarvisHud } from "@/features/jarvis";
 import {
   usePresenceSession,
   usePresenceSubscription,
@@ -888,6 +889,7 @@ export function AppShell() {
                       </div>
                     )}
                     <RequestedAgentCreateDialogs />
+                    <JarvisHud />
                     <AgentManagementDialogs />
                     <AppShellOverlays
                       activeChannel={managedChannel}
