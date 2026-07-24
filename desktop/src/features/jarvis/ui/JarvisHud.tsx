@@ -2,6 +2,7 @@ import * as React from "react";
 import { Bot, X } from "lucide-react";
 
 import { sendChannelMessage } from "@/shared/api/tauri";
+import { useChannelsQuery } from "@/features/channels/hooks";
 import { useManagedAgentObserverBridge } from "@/features/agents/observerRelayStore";
 import {
   useAgentTranscript,
@@ -111,20 +112,40 @@ export function JarvisHud() {
     killedMessageId,
   });
 
+  // Where to send. Prefer the channel the agent is already active in; otherwise
+  // fall back to a real channel so a brand-new agent (empty transcript) doesn't
+  // leave the HUD's input, send button and mic all disabled with no way to
+  // bootstrap. Prefers "general", else the first non-DM channel.
+  const channelsQuery = useChannelsQuery();
+  const fallbackChannelId = React.useMemo(() => {
+    const channels = (channelsQuery.data ?? []).filter(
+      (c) => c.channelType !== "dm",
+    );
+    if (channels.length === 0) return null;
+    const general = channels.find((c) => c.name.toLowerCase() === "general");
+    return (general ?? channels[0]).id;
+  }, [channelsQuery.data]);
+
   const channelId = React.useMemo(
-    () => reply?.channelId ?? activeChannelId(transcript),
-    [reply, transcript],
+    () => reply?.channelId ?? activeChannelId(transcript) ?? fallbackChannelId,
+    [reply, transcript, fallbackChannelId],
   );
 
   const handleSend = React.useCallback(
     (text: string) => {
-      if (!targetPubkey || !channelId) return;
+      console.warn(
+        `[jarvis] send: target=${targetPubkey?.slice(0, 8)} channel=${channelId} text="${text}"`,
+      );
+      if (!targetPubkey || !channelId) {
+        console.warn("[jarvis] send BLOCKED — missing target or channel");
+        return;
+      }
       clearJarvisVoiceKill();
-      void sendChannelMessage(channelId, text, null, undefined, [
-        targetPubkey,
-      ]).catch((err) => {
-        console.warn("[jarvis] send failed:", err);
-      });
+      void sendChannelMessage(channelId, text, null, undefined, [targetPubkey])
+        .then(() => console.warn("[jarvis] send OK"))
+        .catch((err) => {
+          console.warn("[jarvis] send failed:", err);
+        });
     },
     [targetPubkey, channelId],
   );

@@ -45,6 +45,11 @@ export function JarvisControls({
 
   return (
     <div className="flex flex-col gap-2">
+      {voice.error ? (
+        <div className="text-2xs tracking-wider text-red-400">
+          MIC: {voice.error}
+        </div>
+      ) : null}
       <div className="flex flex-wrap gap-1.5">
         {SLASH_COMMANDS.map((cmd) => (
           <button
@@ -67,7 +72,6 @@ export function JarvisControls({
           }}
           onPointerUp={voice.release}
           onPointerLeave={() => voice.holding && voice.release()}
-          disabled={disabled}
           aria-label="Hold to talk"
           title={voice.error ?? "Hold to talk"}
           className={cn(
@@ -75,7 +79,6 @@ export function JarvisControls({
             voice.holding
               ? "jarvis-amber scale-110 border-[color:var(--jarvis-amber)] shadow-[0_0_16px_rgba(255,182,72,0.6)]"
               : "border-[color:var(--jarvis-line)] jarvis-glow-text",
-            disabled && "cursor-not-allowed opacity-40",
           )}
         >
           <Mic className="size-4" />
