@@ -27,6 +27,7 @@ import {
   useJarvisHudState,
 } from "../jarvisHudStore";
 import { useEnsureSeedAgents } from "../lib/useEnsureSeedAgents";
+import { useJarvisAgentReply } from "../lib/useJarvisAgentReply";
 import { useJarvisTarget } from "../lib/useJarvisTarget";
 import { useJarvisPushToTalk } from "../lib/useJarvisPushToTalk";
 import { stopJarvisSpeech, useJarvisVoice } from "../lib/useJarvisVoice";
@@ -102,17 +103,13 @@ export function JarvisHud() {
   const activeTurns = useActiveAgentTurns(targetPubkey);
   const working = activeTurns.length > 0;
 
-  const reply = React.useMemo(
+  // The agent's ACP-side message. Often only a summary ("Replied in the
+  // thread") because the harness's base prompt tells agents to publish the real
+  // answer to the channel — so this is a fallback, not the primary source.
+  const acpReply = React.useMemo(
     () => latestAssistantMessage(transcript),
     [transcript],
   );
-
-  useJarvisVoice({
-    reply: reply ? { id: reply.id, text: reply.text } : null,
-    isWorking: working,
-    voiceEnabled,
-    killedMessageId,
-  });
 
   // Where to send. Prefer the channel the agent is already active in; otherwise
   // fall back to a real channel so a brand-new agent (empty transcript) doesn't
@@ -129,9 +126,23 @@ export function JarvisHud() {
   }, [channelsQuery.data]);
 
   const channelId = React.useMemo(
-    () => reply?.channelId ?? activeChannelId(transcript) ?? fallbackChannelId,
-    [reply, transcript, fallbackChannelId],
+    () =>
+      acpReply?.channelId ?? activeChannelId(transcript) ?? fallbackChannelId,
+    [acpReply, transcript, fallbackChannelId],
   );
+
+  // The answer the agent actually published to the channel. This is what we
+  // show and speak; the ACP message is only a fallback for agents that don't
+  // publish (or before the channel message lands).
+  const channelReply = useJarvisAgentReply(channelId, targetPubkey);
+  const reply = channelReply ?? acpReply;
+
+  useJarvisVoice({
+    reply: reply ? { id: reply.id, text: reply.text } : null,
+    isWorking: working,
+    voiceEnabled,
+    killedMessageId,
+  });
 
   const handleSend = React.useCallback(
     (text: string) => {
