@@ -15,6 +15,19 @@ import type { AcpRuntimeCatalogEntry } from "@/shared/api/types";
 type SeedAgent = { name: string; systemPrompt: string };
 
 /**
+ * Module-level (not per-mount) guard. A component ref let a remount — HMR, a
+ * community switch, StrictMode — re-run the seed before the first creates had
+ * landed in the agents query, which produced duplicate agents with the same
+ * name. Module scope means one seed pass per app session.
+ */
+let seedRunStarted = false;
+
+/** Test-only: allow a fresh seed pass. */
+export function _resetSeedGuardForTests() {
+  seedRunStarted = false;
+}
+
+/**
  * Pick the runtime for seeded agents. We prefer **codex** (the OpenAI/ChatGPT
  * subscription runtime — auth via `codex login`, no API key), then the user's
  * configured preferred runtime, then buzz-agent, then anything available.
@@ -66,8 +79,9 @@ export function useEnsureSeedAgents() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: run exactly once when ready; captured values are read at run time, guarded by doneRef
   React.useEffect(() => {
-    if (!ready || doneRef.current) return;
+    if (!ready || doneRef.current || seedRunStarted) return;
     doneRef.current = true;
+    seedRunStarted = true;
 
     const runtime = pickRuntime(
       runtimesQuery.data ?? [],

@@ -3,6 +3,7 @@ import { Bot, X } from "lucide-react";
 
 import { sendChannelMessage } from "@/shared/api/tauri";
 import { useChannelsQuery } from "@/features/channels/hooks";
+import { attachManagedAgentToChannel } from "@/features/agents/channelAgents";
 import { useManagedAgentObserverBridge } from "@/features/agents/observerRelayStore";
 import {
   useAgentTranscript,
@@ -141,13 +142,30 @@ export function JarvisHud() {
         return;
       }
       clearJarvisVoiceKill();
-      void sendChannelMessage(channelId, text, null, undefined, [targetPubkey])
-        .then(() => console.warn("[jarvis] send OK"))
-        .catch((err) => {
+      // An agent only receives mentions in channels it belongs to. A freshly
+      // seeded agent is in none, so attach it first (idempotent — already-member
+      // is not an error) and only then send, otherwise the message posts fine
+      // but the agent never sees it and the HUD sits on "awaiting activity".
+      void (async () => {
+        if (target) {
+          try {
+            await attachManagedAgentToChannel(channelId, { agent: target });
+            console.warn("[jarvis] agent attached to channel");
+          } catch (e) {
+            console.warn("[jarvis] attach skipped:", e);
+          }
+        }
+        try {
+          await sendChannelMessage(channelId, text, null, undefined, [
+            targetPubkey,
+          ]);
+          console.warn("[jarvis] send OK");
+        } catch (err) {
           console.warn("[jarvis] send failed:", err);
-        });
+        }
+      })();
     },
-    [targetPubkey, channelId],
+    [targetPubkey, channelId, target],
   );
 
   const handleKillVoice = React.useCallback(() => {
@@ -201,7 +219,7 @@ export function JarvisHud() {
             >
               {agents.map((a) => (
                 <option key={a.pubkey} value={a.pubkey}>
-                  {a.name}
+                  {a.name} · {a.status} · {a.pubkey.slice(0, 6)}
                 </option>
               ))}
             </select>
