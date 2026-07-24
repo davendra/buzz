@@ -19,7 +19,7 @@ type LogLine = {
   icon: LucideIcon;
   label: string;
   detail: string;
-  tone: "cyan" | "amber" | "red" | "dim";
+  tone: "cyan" | "amber" | "red" | "dim" | "answer";
 };
 
 function latency(startedAt: string, completedAt: string | null): string {
@@ -90,14 +90,34 @@ const TONE_CLASS: Record<LogLine["tone"], string> = {
   amber: "jarvis-amber",
   red: "text-red-400",
   dim: "text-[color:var(--jarvis-cyan)] opacity-60",
+  // The answer is the payload of the whole turn — full brightness, and it wraps
+  // instead of truncating so it can actually be read.
+  answer: "jarvis-glow-text font-semibold",
 };
 
-export function JarvisActionLog({ items }: { items: TranscriptItem[] }) {
+export function JarvisActionLog({
+  items,
+  answer,
+}: {
+  items: TranscriptItem[];
+  /** The agent's published channel reply — the actual answer, appended last so
+   *  it's readable here and not just spoken. */
+  answer?: { id: string; text: string } | null;
+}) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
-  const lines = React.useMemo(
-    () => items.map(toLogLine).filter((l): l is LogLine => l !== null),
-    [items],
-  );
+  const lines = React.useMemo(() => {
+    const base = items.map(toLogLine).filter((l): l is LogLine => l !== null);
+    if (answer) {
+      base.push({
+        id: `answer-${answer.id}`,
+        icon: MessageSquare,
+        label: "ANSWER",
+        detail: answer.text,
+        tone: "answer",
+      });
+    }
+    return base;
+  }, [items, answer]);
 
   // Auto-scroll to the newest line as activity streams in.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run to pin scroll whenever the line set changes, even though the body only touches the ref
@@ -125,7 +145,15 @@ export function JarvisActionLog({ items }: { items: TranscriptItem[] }) {
               <span className="shrink-0 font-semibold tracking-wider opacity-80">
                 {line.label}
               </span>
-              <span className={cn("min-w-0 truncate", TONE_CLASS[line.tone])}>
+              <span
+                className={cn(
+                  "min-w-0",
+                  // Tool/status lines stay one line so the log scans quickly;
+                  // the answer wraps so it can be read in full.
+                  line.tone === "answer" ? "whitespace-pre-wrap" : "truncate",
+                  TONE_CLASS[line.tone],
+                )}
+              >
                 {line.detail}
               </span>
             </div>

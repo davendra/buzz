@@ -304,7 +304,7 @@ export function JarvisHud() {
           </div>
         </div>
         <div className="flex min-h-0 flex-col">
-          <JarvisActionLog items={transcript} />
+          <JarvisActionLog items={transcript} answer={channelReply} />
         </div>
       </div>
 
