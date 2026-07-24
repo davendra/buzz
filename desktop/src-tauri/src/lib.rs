@@ -865,6 +865,7 @@ pub fn run() {
             jarvis_voice::jarvis_stop_listening,
             jarvis_voice::jarvis_set_ptt,
             jarvis_voice::jarvis_push_audio,
+            jarvis_voice::read_jarvis_seed_agents,
             add_agent_to_huddle,
             check_pipeline_hotstart,
             confirm_huddle_active,

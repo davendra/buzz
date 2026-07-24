@@ -135,3 +135,29 @@ pub fn jarvis_push_audio(
     }
     Ok(())
 }
+
+/// One seed agent definition, read from `~/.buzz/jarvis-seed-agents.json`.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct SeedAgent {
+    pub name: String,
+    #[serde(rename = "systemPrompt")]
+    pub system_prompt: String,
+}
+
+/// Read the user's seed-agent definitions so the frontend can auto-create any
+/// that are missing on startup. Returns an empty list when the file is absent —
+/// this is dev-only convenience, never an error.
+#[tauri::command]
+pub fn read_jarvis_seed_agents() -> Result<Vec<SeedAgent>, String> {
+    let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
+    let path = std::path::Path::new(&home)
+        .join(".buzz")
+        .join("jarvis-seed-agents.json");
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => {
+            serde_json::from_str(&contents).map_err(|e| format!("seed file parse error: {e}"))
+        }
+        Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("seed file read error: {e}")),
+    }
+}

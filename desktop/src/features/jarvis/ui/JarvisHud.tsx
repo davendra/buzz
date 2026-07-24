@@ -23,6 +23,7 @@ import {
   toggleJarvis,
   useJarvisHudState,
 } from "../jarvisHudStore";
+import { useEnsureSeedAgents } from "../lib/useEnsureSeedAgents";
 import { useJarvisTarget } from "../lib/useJarvisTarget";
 import { useJarvisPushToTalk } from "../lib/useJarvisPushToTalk";
 import { stopJarvisSpeech, useJarvisVoice } from "../lib/useJarvisVoice";
@@ -59,6 +60,10 @@ function activeChannelId(items: TranscriptItem[]): string | null {
 }
 
 export function JarvisHud() {
+  // Auto-create the user's saved agents on startup so they persist across
+  // launches (independent of whether the HUD is opened).
+  useEnsureSeedAgents();
+
   const { open, targetOverride, voiceEnabled, killedMessageId } =
     useJarvisHudState();
   const { target, agents } = useJarvisTarget(targetOverride);
