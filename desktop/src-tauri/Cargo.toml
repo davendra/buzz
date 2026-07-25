@@ -55,6 +55,9 @@ keyring = { version = "3.6.3", default-features = false, features = ["windows-na
 user-idle = { version = "0.6", default-features = false }
 
 [dependencies]
+# RS256 signing for the Google service-account JWT (Cloud TTS rejects API keys,
+# so auth is a signed assertion exchanged for an OAuth2 access token).
+jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
 atomic-write-file = "0.3"
 anyhow = "1"
 dirs = "6"

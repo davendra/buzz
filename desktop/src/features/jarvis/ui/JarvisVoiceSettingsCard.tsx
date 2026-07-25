@@ -28,7 +28,7 @@ const PROVIDERS: Array<{
     value: "google",
     label: "Google Chirp 3: HD",
     description:
-      "Google's most natural voice. Free for roughly a million characters a month. Requires a key — see below.",
+      "Google's most natural voice. Free for roughly a million characters a month. Requires a service-account key — see below.",
   },
   {
     value: "browser",
@@ -150,10 +150,12 @@ export function JarvisVoiceSettingsCard() {
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
           <p className="font-medium">Google voice needs a key</p>
           <p className="mt-1 text-muted-foreground">
-            Create a Google Cloud project with the Text-to-Speech API enabled,
-            then put the key in <code>~/.buzz/jarvis-tts.env</code> as{" "}
-            <code>GOOGLE_TTS_API_KEY=…</code> and restart Buzz. The key is read
-            by the app itself and never sent to the browser layer.
+            Cloud Text-to-Speech doesn't accept API keys. In Google Cloud:
+            enable the Text-to-Speech API, create a{" "}
+            <strong>service account</strong>, add a <strong>JSON key</strong>,
+            then save the downloaded file as{" "}
+            <code>~/.buzz/jarvis-tts-google.json</code> and restart Buzz. It is
+            read by the app itself and never sent to the browser layer.
           </p>
         </div>
       ) : null}

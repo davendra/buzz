@@ -227,36 +227,112 @@ pub fn jarvis_stop_speaking(jarvis: State<'_, Mutex<JarvisVoiceState>>) -> Resul
     Ok(())
 }
 
-/// Read a `KEY=value` file, ignoring blanks and `#` comments.
-fn read_env_file(path: &std::path::Path) -> std::collections::HashMap<String, String> {
-    let mut out = std::collections::HashMap::new();
-    let Ok(contents) = std::fs::read_to_string(path) else {
-        return out;
-    };
-    for line in contents.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once('=') {
-            let value = value.trim().trim_matches('"').trim_matches('\'');
-            out.insert(key.trim().to_string(), value.to_string());
-        }
-    }
-    out
+/// Google service-account key file. Cloud Text-to-Speech rejects API keys
+/// ("API keys are not supported by this API"), so auth is a signed JWT
+/// exchanged for a short-lived OAuth2 access token.
+fn google_service_account_path() -> Option<std::path::PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    let path = std::path::Path::new(&home)
+        .join(".buzz")
+        .join("jarvis-tts-google.json");
+    path.exists().then_some(path)
 }
 
-/// Credentials file for cloud voices. Kept out of the app bundle and out of the
-/// webview: the key is read here and used here, so it never reaches browser JS.
-fn tts_credentials() -> std::collections::HashMap<String, String> {
-    let Ok(home) = std::env::var("HOME") else {
-        return std::collections::HashMap::new();
+#[derive(serde::Deserialize)]
+struct GoogleServiceAccount {
+    client_email: String,
+    private_key: String,
+}
+
+#[derive(serde::Serialize)]
+struct JwtClaims<'a> {
+    iss: &'a str,
+    scope: &'a str,
+    aud: &'a str,
+    exp: u64,
+    iat: u64,
+}
+
+/// Cached access token and its unix-seconds expiry. Google's tokens last an
+/// hour; re-signing per request would add latency and pointless load.
+static GOOGLE_TOKEN: std::sync::Mutex<Option<(String, u64)>> = std::sync::Mutex::new(None);
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Mint (or reuse) an OAuth2 access token for the Cloud TTS scope.
+async fn google_access_token(client: &reqwest::Client) -> Result<String, String> {
+    const SKEW: u64 = 60;
+    if let Ok(guard) = GOOGLE_TOKEN.lock() {
+        if let Some((token, expires_at)) = guard.as_ref() {
+            if *expires_at > unix_now() + SKEW {
+                return Ok(token.clone());
+            }
+        }
+    }
+
+    let path = google_service_account_path()
+        .ok_or("no ~/.buzz/jarvis-tts-google.json service-account key")?;
+    let raw = std::fs::read_to_string(&path).map_err(|e| format!("read key file: {e}"))?;
+    let account: GoogleServiceAccount =
+        serde_json::from_str(&raw).map_err(|e| format!("parse key file: {e}"))?;
+
+    let now = unix_now();
+    let claims = JwtClaims {
+        iss: &account.client_email,
+        scope: "https://www.googleapis.com/auth/cloud-platform",
+        aud: "https://oauth2.googleapis.com/token",
+        exp: now + 3600,
+        iat: now,
     };
-    read_env_file(
-        &std::path::Path::new(&home)
-            .join(".buzz")
-            .join("jarvis-tts.env"),
+    let key = jsonwebtoken::EncodingKey::from_rsa_pem(account.private_key.as_bytes())
+        .map_err(|e| format!("service-account private key is not valid RSA PEM: {e}"))?;
+    let assertion = jsonwebtoken::encode(
+        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256),
+        &claims,
+        &key,
     )
+    .map_err(|e| format!("sign jwt: {e}"))?;
+
+    let response = client
+        .post("https://oauth2.googleapis.com/token")
+        .form(&[
+            ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
+            ("assertion", assertion.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("token request failed: {e}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "google token {status}: {}",
+            detail.chars().take(200).collect::<String>()
+        ));
+    }
+    let payload: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("token decode failed: {e}"))?;
+    let token = payload
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or("token response had no access_token")?
+        .to_string();
+    let ttl = payload
+        .get("expires_in")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(3600);
+
+    if let Ok(mut guard) = GOOGLE_TOKEN.lock() {
+        *guard = Some((token.clone(), unix_now() + ttl));
+    }
+    Ok(token)
 }
 
 /// Which voice providers are usable on this machine right now.
@@ -272,9 +348,7 @@ pub struct TtsProviderStatus {
 pub fn jarvis_tts_status() -> TtsProviderStatus {
     TtsProviderStatus {
         pocket_ready: models::is_tts_ready(),
-        google_configured: tts_credentials()
-            .get("GOOGLE_TTS_API_KEY")
-            .is_some_and(|k| !k.is_empty()),
+        google_configured: google_service_account_path().is_some(),
     }
 }
 
@@ -289,11 +363,7 @@ pub async fn jarvis_google_tts(
     voice: String,
     app_state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let key = tts_credentials()
-        .get("GOOGLE_TTS_API_KEY")
-        .filter(|k| !k.is_empty())
-        .cloned()
-        .ok_or("no GOOGLE_TTS_API_KEY in ~/.buzz/jarvis-tts.env")?;
+    let token = google_access_token(&app_state.http_client).await?;
 
     // Voice names are `<locale>-Chirp3-HD-<name>`; the locale prefix is also the
     // languageCode the API expects.
@@ -310,9 +380,8 @@ pub async fn jarvis_google_tts(
 
     let response = app_state
         .http_client
-        .post(format!(
-            "https://texttospeech.googleapis.com/v1/text:synthesize?key={key}"
-        ))
+        .post("https://texttospeech.googleapis.com/v1/text:synthesize")
+        .bearer_auth(&token)
         .json(&body)
         .send()
         .await
@@ -343,17 +412,12 @@ pub async fn jarvis_google_tts(
 /// a voice the account can't actually use.
 #[tauri::command]
 pub async fn jarvis_google_voices(app_state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    let key = tts_credentials()
-        .get("GOOGLE_TTS_API_KEY")
-        .filter(|k| !k.is_empty())
-        .cloned()
-        .ok_or("no GOOGLE_TTS_API_KEY in ~/.buzz/jarvis-tts.env")?;
+    let token = google_access_token(&app_state.http_client).await?;
 
     let response = app_state
         .http_client
-        .get(format!(
-            "https://texttospeech.googleapis.com/v1/voices?key={key}"
-        ))
+        .get("https://texttospeech.googleapis.com/v1/voices")
+        .bearer_auth(&token)
         .send()
         .await
         .map_err(|e| format!("google voices request failed: {e}"))?;
