@@ -68,3 +68,9 @@ identity.key
 
 # Helm dependency tarballs — regenerable from Chart.lock via `helm dependency build`
 deploy/charts/*/charts/*.tgz
+
+# Local dev CLI credentials — contains BUZZ_PRIVATE_KEY, must never be committed
+.buzz-cli.env
+
+# Scratch output from local agent/CLI runs
+scratch-logs/
