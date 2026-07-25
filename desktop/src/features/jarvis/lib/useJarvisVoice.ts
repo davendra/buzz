@@ -1,13 +1,14 @@
 import * as React from "react";
 
+import { useJarvisVoiceSettings } from "../jarvisVoiceSettings";
+import { speak, stopSpeaking } from "./jarvisSpeech";
+
 /**
- * Speak the concierge's reply aloud. The native Pocket TTS command is
- * huddle-gated, so the standalone HUD uses the browser Web Speech API
- * (`speechSynthesis`) — the same fallback the reference JARVIS playbook
- * specifies. We speak once per message, only after the turn settles (so we
- * voice the finished reply, not half-streamed chunks). `speechSynthesis` owns a
- * native utterance queue, so playback is sequential and non-overlapping; the
- * kill switch cancels it outright.
+ * Speak the agent's published answer using the configured provider (Pocket TTS
+ * by default, optionally Google Chirp 3: HD, browser, or off).
+ *
+ * Speaks once per message and only once the turn has settled, so we voice the
+ * finished answer rather than partial streaming text.
  */
 export function useJarvisVoice(params: {
   reply: { id: string; text: string } | null;
@@ -16,10 +17,11 @@ export function useJarvisVoice(params: {
   killedMessageId: string | null;
 }) {
   const { reply, isWorking, voiceEnabled, killedMessageId } = params;
+  const { provider, googleVoice } = useJarvisVoiceSettings();
   const spokenIds = React.useRef<Set<string>>(new Set());
 
   React.useEffect(() => {
-    if (!voiceEnabled || isWorking || !reply) return;
+    if (!voiceEnabled || provider === "off" || isWorking || !reply) return;
     if (reply.text.trim().length <= 1) return;
     if (spokenIds.current.has(reply.id)) return;
     // Kill switch: "*" suppresses everything; a specific id suppresses that one.
@@ -28,17 +30,11 @@ export function useJarvisVoice(params: {
       return;
     }
     spokenIds.current.add(reply.id);
-
-    const synth = window.speechSynthesis;
-    if (!synth) return;
-    const utterance = new SpeechSynthesisUtterance(reply.text);
-    utterance.rate = 1.05;
-    utterance.pitch = 1;
-    synth.speak(utterance);
-  }, [reply, isWorking, voiceEnabled, killedMessageId]);
+    void speak(reply.text, provider, googleVoice);
+  }, [reply, isWorking, voiceEnabled, killedMessageId, provider, googleVoice]);
 }
 
 /** Immediately silence any in-flight or queued speech. */
 export function stopJarvisSpeech() {
-  window.speechSynthesis?.cancel();
+  stopSpeaking();
 }

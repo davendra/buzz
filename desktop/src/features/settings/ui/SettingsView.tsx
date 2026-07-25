@@ -56,6 +56,7 @@ const settingsNavGroups: Array<{
       "appearance",
       "notifications",
       "shortcuts",
+      "jarvis-voice",
       "custom-emoji",
       "local-archive",
     ],

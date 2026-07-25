@@ -10,6 +10,7 @@ import {
   Download,
   FlaskConical,
   Keyboard,
+  Volume2,
   LayoutTemplate,
   LockKeyhole,
   MessagesSquare,
@@ -72,6 +73,7 @@ import { ChannelTemplatesSettingsCard } from "./ChannelTemplatesSettingsCard";
 import { DoctorSettingsPanel } from "./DoctorSettingsPanel";
 import { ExperimentalFeaturesCard } from "./ExperimentalFeaturesCard";
 import { KeyboardShortcutsCard } from "./KeyboardShortcutsCard";
+import { JarvisVoiceSettingsCard } from "@/features/jarvis/ui/JarvisVoiceSettingsCard";
 import { MeshComputeSettingsCard } from "@/features/mesh-compute/ui/MeshComputeSettingsCard";
 import { MobilePairingCard } from "./MobilePairingCard";
 import { ModerationQueueCard } from "./ModerationQueueCard";
@@ -94,6 +96,7 @@ export type SettingsSection =
   | "compute"
   | "appearance"
   | "shortcuts"
+  | "jarvis-voice"
   | "hosted-communities"
   | "community-members"
   | "moderation"
@@ -113,6 +116,7 @@ const SETTINGS_SECTION_VALUES: readonly SettingsSection[] = [
   "compute",
   "appearance",
   "shortcuts",
+  "jarvis-voice",
   "hosted-communities",
   "community-members",
   "moderation",
@@ -194,6 +198,11 @@ export const settingsSections: SettingsSectionDescriptor[] = [
     value: "shortcuts",
     label: "Shortcuts",
     icon: Keyboard,
+  },
+  {
+    value: "jarvis-voice",
+    label: "JARVIS voice",
+    icon: Volume2,
   },
   {
     value: "hosted-communities",
@@ -827,6 +836,8 @@ export function renderSettingsSection(
       return <ThemeSettingsCard />;
     case "shortcuts":
       return <KeyboardShortcutsCard />;
+    case "jarvis-voice":
+      return <JarvisVoiceSettingsCard />;
     case "hosted-communities":
       return <HostedCommunitiesSettingsCard />;
     case "community-members":

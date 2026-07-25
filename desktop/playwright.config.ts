@@ -42,6 +42,7 @@ export default defineConfig({
         "**/config-bridge-screenshots.spec.ts",
         "**/observer-feed-screenshots.spec.ts",
         "**/jarvis-hud-screenshots.spec.ts",
+        "**/jarvis-voice-settings.spec.ts",
         "**/core-memory-screenshots.spec.ts",
         "**/activity-scope-label-screenshots.spec.ts",
         "**/welcome-agent-modal-screenshots.spec.ts",

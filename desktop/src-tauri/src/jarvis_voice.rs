@@ -8,8 +8,10 @@
 //! concierge agent itself (an explicit @mention), so no huddle, no relay post,
 //! and no `HuddleState` coupling are involved.
 //!
-//! Voice *output* stays in the frontend (browser `speechSynthesis`), since the
-//! native TTS command is likewise huddle-gated.
+//! Voice *output* is likewise decoupled: `jarvis_speak` runs its own Pocket TTS
+//! pipeline (the huddle's `speak_agent_message` is gated on an active huddle),
+//! and `jarvis_google_tts` proxies Google Chirp 3: HD so the API key stays in
+//! this process and never reaches browser JS.
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -19,10 +21,13 @@ use std::sync::{
 use tauri::{ipc::InvokeBody, AppHandle, Emitter, State};
 
 use crate::app_state::AppState;
-use crate::huddle::{models, stt::SttPipeline};
+use crate::huddle::{models, stt::SttPipeline, tts::TtsPipeline};
 
 /// Cap per audio batch — mirrors the huddle path's `MAX_AUDIO_BATCH_BYTES`.
 const MAX_AUDIO_BATCH_BYTES: usize = 100 * 1024;
+
+/// Cap on a single synthesis request, mirroring the huddle's `MAX_TTS_TEXT_LEN`.
+const MAX_TTS_TEXT_LEN: usize = 2000;
 
 /// Managed state for the JARVIS voice session. Independent of `HuddleState`.
 #[derive(Default)]
@@ -31,6 +36,14 @@ pub struct JarvisVoiceState {
     /// Push-to-talk gate handed to the STT worker: audio is only transcribed
     /// (and finalized) while this is true.
     ptt_active: Option<Arc<AtomicBool>>,
+    /// Standalone Pocket TTS pipeline — the huddle's `speak_agent_message` is
+    /// gated on an active huddle, so JARVIS runs its own.
+    tts: Option<Arc<TtsPipeline>>,
+    /// Barge-in / kill-switch flag observed by the TTS worker and its monitor
+    /// thread. Setting it silences playback within ~15ms.
+    tts_cancel: Arc<AtomicBool>,
+    /// "TTS is speaking" gate (the huddle uses this to duck the mic).
+    tts_active: Arc<AtomicBool>,
 }
 
 impl JarvisVoiceState {
@@ -134,6 +147,238 @@ pub fn jarvis_push_audio(
         pipeline.push_audio(bytes.to_vec())?;
     }
     Ok(())
+}
+
+// ── Text-to-speech ───────────────────────────────────────────────────────────
+
+/// Speak `text` through JARVIS's own Pocket TTS pipeline.
+///
+/// The huddle's `speak_agent_message` requires an active huddle; this one has no
+/// such gate, so the HUD can talk on its own. The pipeline is built lazily on
+/// first use (~200ms of ONNX session loading) and then reused.
+#[tauri::command]
+pub async fn jarvis_speak(
+    text: String,
+    jarvis: State<'_, Mutex<JarvisVoiceState>>,
+    app_state: State<'_, AppState>,
+) -> Result<(), String> {
+    let text = if text.chars().count() > MAX_TTS_TEXT_LEN {
+        text.chars().take(MAX_TTS_TEXT_LEN).collect()
+    } else {
+        text
+    };
+
+    // Reuse an existing pipeline if we have one.
+    let existing = {
+        let state = jarvis.lock().map_err(|e| e.to_string())?;
+        state.tts.clone()
+    };
+    if let Some(pipeline) = existing {
+        return pipeline.speak(text);
+    }
+
+    if !models::is_tts_ready() {
+        if let Some(manager) = models::global_model_manager() {
+            manager.start_tts_download(app_state.http_client.clone());
+        }
+        return Err("voice model is still downloading — try again shortly".into());
+    }
+    let model_dir = models::tts_model_dir().ok_or("TTS model directory not found")?;
+
+    let (cancel, active) = {
+        let state = jarvis.lock().map_err(|e| e.to_string())?;
+        (Arc::clone(&state.tts_cancel), Arc::clone(&state.tts_active))
+    };
+    cancel.store(false, Ordering::Release);
+
+    let output_device = app_state
+        .audio_output_device
+        .lock()
+        .ok()
+        .and_then(|d| d.clone());
+    let built = tokio::task::spawn_blocking(move || {
+        TtsPipeline::new(model_dir, active, cancel, output_device)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking failed: {e}"))??;
+    let pipeline = Arc::new(built);
+
+    {
+        let mut state = jarvis.lock().map_err(|e| e.to_string())?;
+        // Another call may have won the race while we were constructing.
+        if let Some(existing) = state.tts.clone() {
+            drop(pipeline);
+            return existing.speak(text);
+        }
+        state.tts = Some(Arc::clone(&pipeline));
+    }
+    pipeline.speak(text)
+}
+
+/// Kill switch — silence anything currently being spoken.
+///
+/// Sets the barge-in flag the TTS worker and its monitor thread watch; the
+/// monitor clears the audio player within ~15ms. The worker consumes the flag
+/// and drains its queue, so speech stops without tearing the pipeline down.
+#[tauri::command]
+pub fn jarvis_stop_speaking(jarvis: State<'_, Mutex<JarvisVoiceState>>) -> Result<(), String> {
+    let state = jarvis.lock().map_err(|e| e.to_string())?;
+    state.tts_cancel.store(true, Ordering::Release);
+    Ok(())
+}
+
+/// Read a `KEY=value` file, ignoring blanks and `#` comments.
+fn read_env_file(path: &std::path::Path) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return out;
+    };
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            let value = value.trim().trim_matches('"').trim_matches('\'');
+            out.insert(key.trim().to_string(), value.to_string());
+        }
+    }
+    out
+}
+
+/// Credentials file for cloud voices. Kept out of the app bundle and out of the
+/// webview: the key is read here and used here, so it never reaches browser JS.
+fn tts_credentials() -> std::collections::HashMap<String, String> {
+    let Ok(home) = std::env::var("HOME") else {
+        return std::collections::HashMap::new();
+    };
+    read_env_file(
+        &std::path::Path::new(&home)
+            .join(".buzz")
+            .join("jarvis-tts.env"),
+    )
+}
+
+/// Which voice providers are usable on this machine right now.
+#[derive(serde::Serialize)]
+pub struct TtsProviderStatus {
+    /// Pocket TTS model present — the local, private, free option.
+    pocket_ready: bool,
+    /// A Google Cloud TTS API key is configured.
+    google_configured: bool,
+}
+
+#[tauri::command]
+pub fn jarvis_tts_status() -> TtsProviderStatus {
+    TtsProviderStatus {
+        pocket_ready: models::is_tts_ready(),
+        google_configured: tts_credentials()
+            .get("GOOGLE_TTS_API_KEY")
+            .is_some_and(|k| !k.is_empty()),
+    }
+}
+
+/// Synthesize with Google Cloud TTS (Chirp 3: HD) and return base64 audio.
+///
+/// The API key stays in this process — the frontend receives only audio bytes,
+/// which it plays and can cancel. Returns MP3 so the webview can play it
+/// directly without conversion.
+#[tauri::command]
+pub async fn jarvis_google_tts(
+    text: String,
+    voice: String,
+    app_state: State<'_, AppState>,
+) -> Result<String, String> {
+    let key = tts_credentials()
+        .get("GOOGLE_TTS_API_KEY")
+        .filter(|k| !k.is_empty())
+        .cloned()
+        .ok_or("no GOOGLE_TTS_API_KEY in ~/.buzz/jarvis-tts.env")?;
+
+    // Voice names are `<locale>-Chirp3-HD-<name>`; the locale prefix is also the
+    // languageCode the API expects.
+    let language_code = voice
+        .split_once("-Chirp3")
+        .map(|(prefix, _)| prefix.to_string())
+        .unwrap_or_else(|| "en-US".to_string());
+
+    let body = serde_json::json!({
+        "input": { "text": text },
+        "voice": { "languageCode": language_code, "name": voice },
+        "audioConfig": { "audioEncoding": "MP3" },
+    });
+
+    let response = app_state
+        .http_client
+        .post(format!(
+            "https://texttospeech.googleapis.com/v1/text:synthesize?key={key}"
+        ))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("google tts request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        // Never echo the key back, and keep the excerpt short.
+        return Err(format!(
+            "google tts {status}: {}",
+            detail.chars().take(200).collect::<String>()
+        ));
+    }
+
+    let payload: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("google tts decode failed: {e}"))?;
+    payload
+        .get("audioContent")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "google tts returned no audioContent".to_string())
+}
+
+/// List the Chirp 3: HD voices available to this key, so the picker never shows
+/// a voice the account can't actually use.
+#[tauri::command]
+pub async fn jarvis_google_voices(app_state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let key = tts_credentials()
+        .get("GOOGLE_TTS_API_KEY")
+        .filter(|k| !k.is_empty())
+        .cloned()
+        .ok_or("no GOOGLE_TTS_API_KEY in ~/.buzz/jarvis-tts.env")?;
+
+    let response = app_state
+        .http_client
+        .get(format!(
+            "https://texttospeech.googleapis.com/v1/voices?key={key}"
+        ))
+        .send()
+        .await
+        .map_err(|e| format!("google voices request failed: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("google voices {}", response.status()));
+    }
+    let payload: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("google voices decode failed: {e}"))?;
+
+    let mut names: Vec<String> = payload
+        .get("voices")
+        .and_then(|v| v.as_array())
+        .map(|voices| {
+            voices
+                .iter()
+                .filter_map(|v| v.get("name").and_then(|n| n.as_str()))
+                .filter(|n| n.contains("Chirp3-HD"))
+                .map(|n| n.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    Ok(names)
 }
 
 /// One seed agent definition, read from `~/.buzz/jarvis-seed-agents.json`.
